@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Typed version report · {{ job.label or job.id }}</title>
+<style>
+  body { font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif; color: #14231e; background: #fff;
+         margin: 0 auto; padding: 1.5rem clamp(1rem, 4vw, 3rem) 3rem; max-width: 70rem; line-height: 1.5; }
+  h1 { color: #024a3c; margin: .5rem 0 .25rem; } h2 { color: #024a3c; margin-top: 2rem; border-top: 3px solid #036451; padding-top: 1rem; }
+  h3 { color: #024a3c; margin: 1.2rem 0 .3rem; font-size: 1.05rem; }
+  .meta { color: #46574f; margin: 0 0 1rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  th, td { border: 1px solid #c9d8d1; padding: .45rem .6rem; text-align: left; vertical-align: top; }
+  th { background: #e4f2ec; color: #024a3c; }
+  .num { text-align: right; }
+  .warn { color: #6e4700; font-weight: 700; }
+  .typed { white-space: pre-wrap; background: #f4f8f6; border: 1px solid #c9d8d1; border-radius: 8px; padding: .8rem 1rem; }
+  .tools a { display: inline-block; margin: 0 .6rem .6rem 0; padding: .5rem 1rem; border-radius: 8px; background: #036451;
+             color: #fff; font-weight: 700; text-decoration: none; }
+  .tools a.secondary { background: #fff; color: #036451; border: 2px solid #036451; }
+  :focus-visible { outline: 3px solid #1a4fd6; outline-offset: 2px; }
+  @media print { .tools { display: none; } h2 { break-before: page; } }
+</style>
+</head>
+<body>
+<main>
+{% if web %}
+<p class="tools">
+  <a href="{{ url_for('index') }}">Home</a>
+  <a class="secondary" href="{{ url_for('hw_review', job_id=job.id) }}">Back to handwriting review</a>
+  <a class="secondary" href="{{ url_for('hw_report', job_id=job.id) }}?download=1">Download report (HTML)</a>
+  <a class="secondary" href="{{ url_for('hw_report_csv', job_id=job.id) }}">Download report (CSV)</a>
+</p>
+{% endif %}
+<h1>Typed version report</h1>
+<p class="meta">{{ job.label or ('Batch from ' ~ job.created.replace('T', ' ')[:16]) }} · {{ rows | length }} handwritten file(s) · made {{ made }}</p>
+
+{% if not rows %}
+<p>No handwriting has been transcribed in this batch.</p>
+{% else %}
+<table>
+  <caption class="meta" style="text-align:left">Summary of each handwritten file's review</caption>
+  <thead><tr>
+    <th scope="col">File</th><th scope="col" class="num">Boxes</th><th scope="col" class="num">Approved</th>
+    <th scope="col" class="num">Skipped</th><th scope="col" class="num">Not reviewed</th>
+    <th scope="col" class="num">Edited by a person</th><th scope="col" class="num">Unclear [?]</th>
+    <th scope="col" class="num">Diagrams</th><th scope="col" class="num">Equations</th><th scope="col">Typed version</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <th scope="row">{{ r.file }}</th>
+      <td class="num">{{ r.boxes }}</td><td class="num">{{ r.approved }}</td><td class="num">{{ r.skipped }}</td>
+      <td class="num">{% if r.pending %}<span class="warn">{{ r.pending }}</span>{% else %}0{% endif %}</td>
+      <td class="num">{{ r.edited }}</td>
+      <td class="num">{% if r.unclear %}<span class="warn">{{ r.unclear }}</span>{% else %}0{% endif %}</td>
+      <td class="num">{{ r.diagrams | length }}</td><td class="num">{{ r.equations }}</td>
+      <td>{% if r.typed_pdf or r.typed_docx %}{{ r.typed_docx }}{% if r.typed_docx and r.typed_pdf %}<br>{% endif %}{{ r.typed_pdf }}{% else %}<span class="warn">Not built yet</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="meta">"Edited by a person" counts approved boxes whose text differs from the AI's draft. "Unclear [?]" marks are
+places the AI couldn't read that still need checking.</p>
+
+{% for r in rows %}
+<h2>{{ r.file }}</h2>
+{% if r.diagrams %}
+<h3>Diagram descriptions</h3>
+<ol>{% for d in r.diagrams %}<li>{{ d }}</li>{% endfor %}</ol>
+{% endif %}
+{% if r.pages %}
+{% for p, text in r.pages %}
+<h3>Page {{ p }}: typed text</h3>
+<div class="typed">{{ text }}</div>
+{% endfor %}
+{% else %}
+<p class="warn">No boxes approved yet, so there is no typed text.</p>
+{% endif %}
+{% endfor %}
+{% endif %}
+</main>
+</body>
+</html>

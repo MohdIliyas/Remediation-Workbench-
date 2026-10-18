@@ -1,0 +1,49 @@
+{% extends "_base.html" %}
+{% block title %}Typed version report · {{ job.label or job.id }}{% endblock %}
+{% block main %}
+<p class="home-row no-print"><a class="button" href="{{ url_for('index') }}"><svg class="home-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20"><path d="M3 11.5 12 4l9 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 10v9.5h5v-5.5h3v5.5h5V10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg> Home</a>
+  <a class="back-link" href="{{ url_for('show_job', job_id=job.id) }}">Back to batch results</a>
+  <a class="back-link" href="{{ url_for('hw_review', job_id=job.id) }}">Review handwriting</a></p>
+<h1>Typed version report</h1>
+<p class="lede">{{ job.label or ('Batch from ' ~ job.created.replace('T', ' ')[:16]) }} · {{ rows | length }} handwritten file(s) · made {{ made }}</p>
+<div class="actions small no-print">
+  <button type="button" onclick="window.print()">Print or save as PDF</button>
+  <a class="button secondary" href="{{ url_for('typed_report_csv', job_id=job.id) }}">Download as CSV</a>
+</div>
+
+{% if not rows %}
+<p class="notice info">No handwritten files in this batch.</p>
+{% else %}
+<h2>Summary</h2>
+<div class="table-scroll">
+<table class="report-table">
+  <thead><tr><th scope="col">File</th><th scope="col">Boxes</th><th scope="col">Approved</th><th scope="col">Skipped</th>
+    <th scope="col">Not reviewed</th><th scope="col">Typed version</th><th scope="col">Drawings</th><th scope="col">Equations</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr><th scope="row"><a href="#f{{ r.index }}">{{ r.file }}</a></th><td>{{ r.boxes }}</td><td>{{ r.approved }}</td>
+      <td>{{ r.skipped }}</td><td>{{ r.pending }}</td><td>{{ 'Built' if r.built else 'Not built yet' }}</td>
+      <td>{{ r.drawings | length }}</td><td>{{ r.equations | length }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% for r in rows %}
+<section class="typed-file" id="f{{ r.index }}">
+  <h2>{{ r.file }}</h2>
+  <p>{{ r.approved }} of {{ r.boxes }} box(es) approved{% if r.skipped %}, {{ r.skipped }} skipped{% endif %}{% if r.pending %}, <strong>{{ r.pending }} not reviewed yet</strong>{% endif %}.
+    {% if r.built %}Typed version built:{% for o in r.typed %} <a href="{{ url_for('download_file', job_id=job.id, name=o) }}">{{ o }}</a>{% if not loop.last %},{% endif %}{% endfor %}.
+    {% else %}Typed version not built yet.{% endif %}</p>
+  {% if r.headings %}<h3>Headings</h3><ul>{% for h in r.headings %}<li>{{ h }}</li>{% endfor %}</ul>{% endif %}
+  {% if r.drawings %}<h3>Drawings (alt text)</h3><ol>{% for d in r.drawings %}<li>{{ d }}</li>{% endfor %}</ol>{% endif %}
+  {% if r.equations %}<h3>Equations (as read aloud)</h3><ol>{% for e in r.equations %}<li>{{ e }}</li>{% endfor %}</ol>{% endif %}
+  <h3>Typed text</h3>
+  {% for p in r.pages %}
+  <h4>Page {{ p.page }}</h4>
+  <pre class="typed-text">{{ p.text }}</pre>
+  {% else %}<p class="where">No approved text yet.</p>{% endfor %}
+</section>
+{% endfor %}
+{% endif %}
+{% endblock %}

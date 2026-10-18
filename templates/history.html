@@ -1,0 +1,104 @@
+{% extends "_base.html" %}
+{% block title %}History · Remediation Workbench{% endblock %}
+{% block main %}
+<p class="home-row"><a class="button" href="{{ url_for('index') }}"><svg class="home-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20"><path d="M3 11.5 12 4l9 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 10v9.5h5v-5.5h3v5.5h5V10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg> Home</a></p>
+<h1>History of remediated files</h1>
+<p class="lede">Every file remediated with this tool, newest first, with its original, its remediated files and the
+report. History keeps its own copies, so they stay here after a batch is deleted or cleaned up{% if keep_days %}
+(for {{ keep_days }} days){% endif %}.</p>
+
+<h2 class="visually-hidden">Summary</h2>
+<ul class="tally hist-summary">
+  <li class="tot"><button type="button" class="stat-btn" data-filter="all" aria-pressed="true" aria-controls="hist-table">
+    <b>{{ summary.total }}</b><span>Total files</span><span class="visually-hidden"> (show all)</span></button></li>
+  <li class="ok"><button type="button" class="stat-btn" data-filter="remediated" aria-pressed="false" aria-controls="hist-table">
+    <b>{{ summary.remediated }}</b><span>Remediated</span></button></li>
+  <li class="am"><button type="button" class="stat-btn" data-filter="review" aria-pressed="false" aria-controls="hist-table">
+    <b>{{ summary.review }}</b><span>Remediated: requires review</span></button></li>
+  <li class="bad"><button type="button" class="stat-btn" data-filter="failed" aria-pressed="false" aria-controls="hist-table">
+    <b>{{ summary.failed }}</b><span>Remediation failed</span></button></li>
+  <li class="run"><div class="stat-static"><b>{{ summary.in_progress }}</b><span>Remediation in progress</span></div></li>
+  {% if summary.stopped %}<li><button type="button" class="stat-btn" data-filter="stopped" aria-pressed="false" aria-controls="hist-table">
+    <b>{{ summary.stopped }}</b><span>Stopped</span></button></li>{% endif %}
+</ul>
+<p class="where">Select a box to show only those files. &ldquo;Requires review&rdquo; means the file was remediated and its checklist still has items for a person (for example checking AI alt text or OCR).</p>
+
+{% if rows %}
+<div class="field">
+  <label for="hist-search">Search by file or batch name</label>
+  <input type="text" id="hist-search" aria-controls="hist-table" autocomplete="off">
+</div>
+<p id="hist-count" class="where" role="status" aria-live="polite">{{ rows | length }} file(s)</p>
+<ul class="hist-list" id="hist-table">
+  {% for r in rows %}
+  {% set state = 'failed' if r.status == 'error' else ('stopped' if r.status == 'cancelled' else ('review' if r.review else 'remediated')) %}
+  <li class="hist-card" data-state="{{ state }}" data-search="{{ (r.file ~ ' ' ~ r.label ~ ' ' ~ r.batch) | lower }}">
+    <h2 class="hist-name">{{ r.file }}</h2>
+    <p class="hist-meta">
+      {% if r.batch_exists %}<a href="{{ url_for('show_job', job_id=r.batch) }}">{{ r.label or r.batch }}</a>{% else %}{{ r.label or r.batch }}{% endif %}
+      · {{ (r.finished or r.created)[:16].replace('T', ' ') }}
+      · {{ {'done': 'Done', 'error': 'Failed', 'cancelled': 'Stopped'}.get(r.status, r.status | capitalize) }}{% if r.status == 'done' %}
+        ({{ r.fixed }} fixed, {{ r.review }} to review{% if r.images %}, {{ r.images }} image(s){% endif %}){% endif %}
+      {% if r.seconds %}· took {{ r.seconds | duration }}{% endif %}
+    </p>
+    {% if r.status == 'error' %}
+    <p class="hist-error"><strong>Why it failed:</strong>
+      {{ (r.get('errors') or ['No error details were recorded for this file (it was remediated before version 9.27).']) | join(' ') }}</p>
+    {% endif %}
+    {% if r.removed %}
+    <p class="where">Files deleted from history.</p>
+    {% elif not r.original_ok and not r.files %}
+    <p class="where">No copies kept for this file.</p>
+    {% else %}
+    <div class="hist-files">
+      {% if r.original_ok %}<a class="dl" href="{{ url_for('history_file', batch=r.batch, kind='in', name=r.original) }}"><span class="dl-kind">Original</span> {{ r.original }}</a>{% endif %}
+      {% for o in r.files %}<a class="dl dl-main" href="{{ url_for('history_file', batch=r.batch, kind='out', name=o) }}"><span class="dl-kind">Remediated</span> {{ o }}</a>{% endfor %}
+      {% if r.report_ok %}<a class="dl" href="{{ url_for('history_file', batch=r.batch, kind='report', name='remediation-report.html') }}" target="_blank" rel="noopener"><span class="dl-kind">Report</span> opens in a new tab</a>{% endif %}
+    </div>
+    <p class="hist-del"><button type="button" class="link-btn" data-del="{{ r.batch }}/{{ r.index }}"
+        aria-label="Delete the saved copies of {{ r.file }}">Delete files</button></p>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="notice info">No remediated files yet. Finished batches appear here.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const box = document.getElementById('hist-search');
+document.querySelectorAll('[data-del]').forEach(btn => btn.addEventListener('click', async () => {
+  if (!confirm('Delete the saved copies of this file from history? The history line stays as a record.')) return;
+  const r = await fetch(`/api/history/${btn.dataset.del}/delete`, {method: 'POST'});
+  if ((await r.json().catch(() => ({}))).ok) location.reload(); else alert('Could not delete the files.');
+}));
+let statusFilter = 'all';
+function applyFilters() {
+  const q = (document.getElementById('hist-search') || {value: ''}).value.trim().toLowerCase();
+  const cards = [...document.querySelectorAll('#hist-table .hist-card')];
+  let shown = 0;
+  cards.forEach(c => {
+    const hit = (statusFilter === 'all' || c.dataset.state === statusFilter) && (!q || c.dataset.search.includes(q));
+    c.hidden = !hit; if (hit) shown++;
+  });
+  const count = document.getElementById('hist-count');
+  if (count) count.textContent = (statusFilter === 'all' && !q) ? `${cards.length} file(s)` : `${shown} of ${cards.length} file(s) shown`;
+}
+document.querySelectorAll('.stat-btn').forEach(btn => btn.addEventListener('click', () => {
+  statusFilter = btn.dataset.filter;
+  document.querySelectorAll('.stat-btn').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+  applyFilters();
+  const first = document.querySelector('#hist-table .hist-card:not([hidden])');
+  const list = document.getElementById('hist-table');
+  if (list) list.scrollIntoView({behavior: 'smooth', block: 'start'});
+  if (first) { first.setAttribute('tabindex', '-1'); first.focus({preventScroll: true}); }
+}));
+if (box) {
+  const rows = [...document.querySelectorAll('#hist-table .hist-card')];
+  const count = document.getElementById('hist-count');
+  box.addEventListener('input', applyFilters);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,19 @@
+services:
+  workbench:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      APP_PASSWORD: "change-me"      # shared team password (leave empty to turn off)
+      WORKERS: "2"                    # files processed at once; raise on a bigger machine
+      RETENTION_DAYS: "7"             # uploaded and remediated files are deleted after this
+      CHECK_LINKS: "1"
+      # Local AI alt-text drafts (Ollama on this computer, see README).
+      # Put a # in front of these two lines to turn drafts off.
+      OLLAMA_URL: "http://host.docker.internal:11434"
+      OLLAMA_MODEL: "qwen2.5vl:7b"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

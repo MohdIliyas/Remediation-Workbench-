@@ -1,0 +1,201 @@
+{% extends "_base.html" %}
+{% block title %}Handwriting review · {{ job.label }}{% endblock %}
+{% block main %}
+{% with step = 3 %}{% include "_steps.html" %}{% endwith %}
+<p class="home-row"><a class="button" href="{{ url_for('index') }}"><svg class="home-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20"><path d="M3 11.5 12 4l9 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 10v9.5h5v-5.5h3v5.5h5V10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg> Home</a>
+  <a class="back-link" href="{{ url_for('show_job', job_id=job.id) }}">Back to batch results</a></p>
+<h1>Handwriting review</h1>
+<p class="lede">The AI on this computer transcribed each box. <strong>It misreads handwriting and math</strong> (a <em>z</em>
+read as <em>2</em>, a missed answer, a symbol that isn't there), so compare every box with the original. Edit the text,
+check the drawn math, then <strong>Approve</strong> it, or <strong>Skip</strong> boxes with nothing to keep.
+When every box is done, build the typed version.</p>
+<details class="guide"><summary>How to write math in the box</summary>
+  <p>Describe each drawing on its own line as <code>[Diagram: what it shows, with its labels and values]</code>; it becomes the picture's alt text.</p>
+  <p>Put math between dollar signs: <code>$2y^2(3y-2)(y-4)$</code>. Powers <code>x^2</code>, fractions
+  <code>\frac{8}{3}</code>, square roots <code>\sqrt{x}</code>, plus or minus <code>\pm</code>. One step per line.
+  Text outside the dollar signs stays plain text.</p>
+</details>
+<p id="hw-announce" class="visually-hidden" role="status" aria-live="polite"></p>
+
+{% if files %}
+<div class="bulk-alt">
+  <h2 class="visually-hidden">Approve in bulk</h2>
+  <div class="actions small">
+    <button type="button" id="hw-approve-all">Approve all</button>
+    <button type="button" class="button secondary" id="hw-build-all">Build all typed versions</button>
+    <a class="button secondary" href="{{ url_for('typed_report', job_id=job.id) }}">Typed version report</a>
+    <a class="button secondary" href="{{ url_for('hw_report', job_id=job.id) }}" target="_blank" rel="noopener">Typed version report<span class="visually-hidden"> (opens in a new tab)</span></a>
+  </div>
+  <p class="where" id="hw-build-all-status" role="status" aria-live="polite"></p>
+  <p class="where">Approve all approves every box that still needs review and has text, exactly as its text reads now
+    (empty boxes are skipped). It asks you to confirm first; AI transcriptions can still be wrong.</p>
+</div>
+{% endif %}
+
+{% for i, f in files %}
+{% set boxes = f.hw %}
+<section class="hw-file" data-index="{{ i }}">
+  <h2>{{ f.filename }}</h2>
+  <div class="actions small">
+    <button type="button" class="hw-build" data-index="{{ i }}">Build typed version</button>
+    <span class="where hw-left" data-index="{{ i }}"></span>
+  </div>
+  {% for page in boxes | map(attribute='page') | unique %}
+  <h3 class="hw-page">Page {{ page }}
+    <button type="button" class="link-btn hw-turn" data-index="{{ i }}" data-page="{{ page }}"
+      {% if job.get('hw_busy', {}).get(i ~ ':' ~ page) %}disabled{% endif %}>
+      {% if job.get('hw_busy', {}).get(i ~ ':' ~ page) %}Re-reading…{% else %}Upside down? Turn page and re-read{% endif %}</button></h3>
+  <ol class="hw-list">
+  {% for b in boxes if b.page == page %}
+    <li class="hw-card" id="hw-{{ b.id }}" data-id="{{ b.id }}" data-status="{{ b.status }}">
+      <figure class="hw-orig"><img src="{{ url_for('alt_image', job_id=job.id, name=b.image) }}" alt="Handwritten box {{ loop.index }} on page {{ page }} (original)">
+        {% for d in b.get('diagrams', []) %}
+        <figcaption class="where">Diagram {{ loop.index }}{% if d.whole_box %} (whole box: the AI couldn't place it){% endif %}. Its description is the matching [Diagram: …] line; it becomes the picture's alt text.</figcaption>
+        <img class="hw-diagram" src="{{ url_for('alt_image', job_id=job.id, name=d.image) }}" alt="Diagram {{ loop.index }} cropped from this box">
+        {% endfor %}
+      </figure>
+      <div class="hw-edit">
+        <p class="status-line"><span class="badge"></span>{% if b.failed %} <span class="where">The AI couldn't read this box; type it in.</span>{% endif %}</p>
+        <label for="t-{{ b.id }}">Transcription</label>
+        <textarea id="t-{{ b.id }}" rows="7" spellcheck="false">{{ b.final or b.draft }}</textarea>
+        <p class="where">How the math will look:</p>
+        <img class="hw-prev" alt="Drawn preview of the transcription" hidden>
+        <div class="actions small">
+          <button type="button" data-act="approved">Approve</button>
+          <button type="button" class="button secondary" data-act="skipped">Skip</button>
+          <button type="button" class="link-btn" data-act="pending" hidden>Undo</button>
+        </div>
+      </div>
+    </li>
+  {% endfor %}
+  </ol>
+  {% endfor %}
+</section>
+{% else %}
+<p class="notice info">No handwriting was transcribed in this batch.</p>
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SAVE = "{{ url_for('hw_save', job_id=job.id) }}";
+const PREVIEW = "{{ url_for('hw_preview', job_id=job.id) }}";
+const BASE = "/api/jobs/{{ job.id }}/files/";
+const announce = t => { document.getElementById('hw-announce').textContent = t; };
+const LABEL = {pending: 'Not reviewed', approved: 'Approved', skipped: 'Skipped'};
+
+function paint(card) {
+  const st = card.dataset.status;
+  const badge = card.querySelector('.badge');
+  badge.textContent = LABEL[st]; badge.className = 'badge ' + st;
+  card.querySelector('[data-act=pending]').hidden = st === 'pending';
+  card.querySelectorAll('[data-act=approved],[data-act=skipped]').forEach(b => b.hidden = st !== 'pending');
+  card.querySelector('textarea').readOnly = st !== 'pending';
+  counts();
+}
+function counts() {
+  document.querySelectorAll('.hw-file').forEach(sec => {
+    const cards = [...sec.querySelectorAll('.hw-card')];
+    const left = cards.filter(c => c.dataset.status === 'pending').length;
+    sec.querySelector('.hw-left').textContent = left ? `${left} of ${cards.length} boxes still to review` : 'All boxes reviewed';
+    sec.querySelector('.hw-build').disabled = left > 0 || !cards.some(c => c.dataset.status === 'approved');
+  });
+}
+const timers = {};
+// draw a box's math preview only when it scrolls into view (a big batch has hundreds of boxes)
+const seen = new IntersectionObserver(entries => entries.forEach(en => {
+  if (en.isIntersecting) { seen.unobserve(en.target); preview(en.target); }
+}), {rootMargin: '400px 0px'});
+function watchPreview(card) { if ('IntersectionObserver' in window) seen.observe(card); else preview(card); }
+async function preview(card) {
+  const img = card.querySelector('.hw-prev');
+  const r = await fetch(PREVIEW, {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text: card.querySelector('textarea').value})});
+  if (!r.ok) return;
+  if (img.src) URL.revokeObjectURL(img.src);
+  img.src = URL.createObjectURL(await r.blob()); img.hidden = false;
+}
+document.querySelectorAll('.hw-card').forEach(card => {
+  paint(card); watchPreview(card);
+  card.querySelector('textarea').addEventListener('input', () => {
+    clearTimeout(timers[card.id]); timers[card.id] = setTimeout(() => preview(card), 700);
+  });
+  card.querySelectorAll('[data-act]').forEach(btn => btn.addEventListener('click', async () => {
+    const status = btn.dataset.act;
+    const r = await fetch(SAVE, {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: card.dataset.id, status, text: card.querySelector('textarea').value})});
+    if (!(await r.json().catch(() => ({}))).ok) { alert('Could not save.'); return; }
+    card.dataset.status = status; paint(card);
+    announce(`Box ${LABEL[status].toLowerCase()}.`);
+    if (status !== 'pending') {
+      const next = [...document.querySelectorAll('.hw-card[data-status=pending] textarea')][0];
+      if (next) next.focus();
+    }
+  }));
+});
+document.querySelectorAll('.hw-build').forEach(btn => btn.addEventListener('click', async () => {
+  btn.disabled = true; btn.textContent = 'Building…';
+  const r = await fetch(BASE + btn.dataset.index + '/handwriting/build', {method: 'POST'});
+  const data = await r.json().catch(() => ({}));
+  btn.textContent = 'Build typed version';
+  if (!data.ok) { alert(data.error || 'Could not build.'); counts(); return; }
+  announce('Typed version built.');
+  alert('Built ' + data.files.join(' and ') + '. Download them from the batch results page or history.');
+  counts();
+}));
+document.querySelectorAll('.hw-turn').forEach(btn => btn.addEventListener('click', async () => {
+  if (!confirm('Turn this page upside down and read it again? Its boxes will be replaced with new transcriptions.')) return;
+  btn.disabled = true; btn.textContent = 'Re-reading…';
+  await fetch(BASE + btn.dataset.index + '/handwriting/turn', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({page: Number(btn.dataset.page)})});
+  const wait = async () => {
+    const job = await (await fetch("{{ url_for('job_json', job_id=job.id) }}")).json();
+    if ((job.hw_busy || {})[btn.dataset.index + ':' + btn.dataset.page]) return setTimeout(wait, 3000);
+    location.reload();
+  };
+  setTimeout(wait, 3000);
+}));
+document.getElementById('hw-approve-all')?.addEventListener('click', async () => {
+  const cards = [...document.querySelectorAll('.hw-card[data-status=pending]')]
+    .filter(c => c.querySelector('textarea').value.trim());
+  const emptyCards = [...document.querySelectorAll('.hw-card[data-status=pending]')]
+    .filter(c => !c.querySelector('textarea').value.trim());
+  const empty = emptyCards.length;
+  if (!cards.length && !emptyCards.length) { alert('Every box is already reviewed.'); return; }
+  if (!confirm(`Approve ${cards.length} box(es) with the text currently in them?` +
+               (empty ? ` ${empty} empty box(es) will be skipped.` : '') +
+               ' AI transcriptions can be wrong; this approves them as they are.')) return;
+  const btn = document.getElementById('hw-approve-all');
+  btn.disabled = true; btn.textContent = 'Approving…';
+  const r = await fetch("{{ url_for('hw_save_many', job_id=job.id) }}", {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({items: cards.map(c => ({id: c.dataset.id, status: 'approved',
+                                                  text: c.querySelector('textarea').value}))
+                          .concat(emptyCards.map(c => ({id: c.dataset.id, status: 'skipped', text: ''})))})});
+  const data = await r.json().catch(() => ({}));
+  btn.disabled = false; btn.textContent = 'Approve all';
+  if (!data.ok) { alert(data.error || 'Could not save.'); return; }
+  cards.forEach(c => { c.dataset.status = 'approved'; paint(c); });
+  emptyCards.forEach(c => { c.dataset.status = 'skipped'; paint(c); });
+  announce(`${data.saved} box(es) approved.`);
+});
+document.getElementById('hw-build-all')?.addEventListener('click', async () => {
+  const ready = [...document.querySelectorAll('.hw-build')].filter(b => !b.disabled);
+  const status = document.getElementById('hw-build-all-status');
+  if (!ready.length) { status.textContent = 'No file is ready yet: approve or skip every box of a file first.'; return; }
+  const all = document.getElementById('hw-build-all');
+  all.disabled = true;
+  let done = 0, failed = [];
+  for (const b of ready) {   // one after another: the same build as each file's own button
+    status.textContent = `Building typed version ${done + failed.length + 1} of ${ready.length}…`;
+    const r = await fetch(BASE + b.dataset.index + '/handwriting/build', {method: 'POST'});
+    const data = await r.json().catch(() => ({}));
+    if (data.ok) done++; else failed.push(b.closest('.hw-file').querySelector('h2').textContent);
+  }
+  all.disabled = false;
+  status.textContent = `Built ${done} typed version(s).` + (failed.length ? ` Couldn't build: ${failed.join(', ')}.` : '') +
+    ' Download them from the batch results page or History.';
+});
+counts();
+</script>
+{% endblock %}

@@ -1,0 +1,272 @@
+{% extends "_base.html" %}
+{% block title %}Alt text review · {{ job.label or job.id }}{% endblock %}
+{% block main %}
+{% with step = 3 %}{% include "_steps.html" %}{% endwith %}
+{% set files = job.files | selectattr('alt') | list %}
+<p class="home-row"><a class="button" href="{{ url_for('index') }}"><svg class="home-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20"><path d="M3 11.5 12 4l9 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 10v9.5h5v-5.5h3v5.5h5V10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg> Home</a>
+  <a class="back-link" href="{{ url_for('show_job', job_id=job.id) }}">Back to batch results</a></p>
+<h1>Alt text review</h1>
+<p class="lede">For each image, read the draft, fix anything that's wrong, then choose <strong>Approve</strong> or <strong>Decorative</strong>.
+Nothing changes in the files until you press <strong>Save</strong>. Drafts come from a model on this computer and can be wrong, so check every one.</p>
+
+<div class="alt-tips">
+  <details><summary>Quick guide to good alt text</summary>
+    <ul class="fixed-list">
+      <li>Say what the image tells a student, not everything in it. One or two sentences, ideally under 250 characters.</li>
+      <li>Don't start with "Image of". Screen readers already announce it as an image.</li>
+      <li>Charts: the type and the main point ("Bar chart: enrollment rose each year from 2022 to 2025").</li>
+      <li>Logos: the organization's name plus "logo". Photos of people: who they are, if that matters.</li>
+      <li>Decorative means it adds nothing (borders, background art). Screen readers will skip it.</li>
+      <li>Complex charts, diagrams or equations need a longer description in the document too, such as a paragraph or data table right after the image.</li>
+    </ul>
+  </details>
+</div>
+
+{% set undrafted = files | map(attribute='alt') | sum(start=[]) | selectattr('status', 'equalto', 'pending') | rejectattr('draft') | rejectattr('tiny') | selectattr('ai_image') | list | length %}
+{% set drafting = job.get('drafting', {}) %}
+{% if ai.on and (undrafted or drafting.get('running')) %}
+<div class="notice info draft-box" id="draft-box">
+  <p id="draft-status" role="status" aria-live="polite">
+    {% if drafting.get('running') %}Writing alt-text drafts automatically… they appear below as they're ready.{% else %}{{ undrafted }} image(s) have no draft yet.{% endif %}
+  </p>
+  <div class="actions small">
+    <button type="button" id="draft-start" {% if drafting.get('running') %}hidden{% endif %}>Draft with AI</button>
+    <button type="button" class="button secondary" id="draft-stop" {% if not drafting.get('running') %}hidden{% endif %}>Stop drafting</button>
+  </div>
+  <p class="where">Drafts run in the background and appear in the boxes below as they're written. Boxes you've already typed in are left alone.</p>
+</div>
+{% endif %}
+
+{% if not files %}
+<p class="notice info">No images in this batch need alt text.</p>
+{% else %}
+{% set pending_left = files | map(attribute='alt') | sum(start=[]) | selectattr('status', 'equalto', 'pending') | list | length %}
+{% if pending_left == 0 %}
+<p class="notice ok">All images are reviewed: each one is approved or marked decorative. You can still edit any of them below.</p>
+{% endif %}
+<div class="bulk-alt"{% if pending_left == 0 %} hidden{% endif %}>
+  <h2 class="visually-hidden">Approve in bulk</h2>
+  <div class="actions small">
+    <button type="button" id="approve-all">Approve all</button>
+    <button type="button" class="button secondary" id="decorative-all">Mark suggested decorative</button>
+  </div>
+  <p class="where">Approve all saves every image that has text in its box (empty boxes are skipped). Mark suggested
+    decorative saves the images the tool flagged as decorative. Both ask you to confirm first; drafts can still be wrong.</p>
+</div>
+{% endif %}
+
+{% for f in files %}
+<section class="alt-file" aria-labelledby="af{{ loop.index }}">
+  <h2 id="af{{ loop.index }}">{{ f.filename }}</h2>
+  <ol class="alt-list">
+  {% for it in f.alt %}
+    <li class="alt-card" id="card-{{ it.id }}" data-id="{{ it.id }}" data-status="{{ it.status }}" data-suggested="{{ '1' if it.decorative_suggested else '0' }}">
+      <div class="alt-img">
+        {% if it.preview %}
+        <img src="{{ url_for('alt_image', job_id=job.id, name=it.preview) }}" alt="Image {{ loop.index }} to describe, from {{ f.filename }}" loading="lazy">
+        {% else %}
+        <p class="where">No preview available for this image format. Open the file to see it.</p>
+        {% endif %}
+      </div>
+      <div class="alt-form">
+        <h3>{{ it.where }}</h3>
+        <p class="badges">
+          <span class="status" data-role="status"></span>
+          {% if it.complex %}<span class="status review">Needs a longer description too</span>{% endif %}
+          {% if it.decorative_suggested %}<span class="status processing">Model suggests decorative</span>{% endif %}
+        </p>
+        <label for="t-{{ it.id }}">Alt text</label>
+        <textarea id="t-{{ it.id }}" rows="3" aria-describedby="c-{{ it.id }}">{{ it.final or it.draft or it.existing }}</textarea>
+        <p class="where" id="c-{{ it.id }}"><span data-role="count"></span> characters{% if it.ai %}. AI draft.{% elif not it.draft %}. No draft: write it yourself.{% endif %}</p>
+        {% if it.context %}
+        <details><summary>Nearby text in the document</summary><p class="where">{{ it.context }}</p></details>
+        {% endif %}
+        <div class="actions small">
+          <button type="button" data-act="approved">Approve</button>
+          <button type="button" class="button secondary" data-act="decorative">Decorative</button>
+        </div>
+        <p class="where" data-role="note">{{ it.note or '' }}</p>
+        {% for n in it.get('notes_ai', []) %}<p class="ai-flag">&#9888; {{ n }}</p>{% endfor %}
+        {% if it.get('long') %}
+        <details class="long-desc"><summary>Suggested long description (complex image)</summary>
+          <p>{{ it.long }}</p>
+          <p class="where">Put this next to the image in the document (for example as a caption or a paragraph right after it).</p>
+        </details>
+        {% endif %}
+      </div>
+    </li>
+  {% endfor %}
+  </ol>
+</section>
+{% endfor %}
+
+<div class="savebar" id="savebar" hidden>
+  <p id="pending-text"></p>
+  <button type="button" id="save">Save decisions</button>
+</div>
+<p id="announce" class="visually-hidden" role="status" aria-live="polite"></p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SAVE_URL = "{{ url_for('alt_save', job_id=job.id) }}";
+const pending = new Map();      // id -> {status, text}
+const LABEL = {pending: 'Not reviewed', approved: 'Approved', decorative: 'Decorative'};
+
+function paint(card) {
+  const id = card.dataset.id, p = pending.get(id), saved = card.dataset.status;
+  const st = card.querySelector('[data-role=status]');
+  const status = p ? p.status : saved;
+  st.textContent = (p ? 'Unsaved: ' : '') + LABEL[status];
+  st.className = 'status ' + (status === 'pending' ? 'queued' : status === 'decorative' ? 'processing' : 'done');
+  card.querySelectorAll('[data-act]').forEach(b => b.setAttribute('aria-pressed', String(status === b.dataset.act)));
+  card.classList.toggle('is-done', status !== 'pending');
+  const ta = card.querySelector('textarea');
+  ta.disabled = status === 'decorative';
+  const n = ta.value.trim().length, c = card.querySelector('[data-role=count]');
+  c.textContent = n + (n > 250 ? ' (long: consider shortening, or move detail into the document)' : '');
+}
+function bar() {
+  const n = pending.size;
+  document.getElementById('savebar').hidden = n === 0;
+  document.getElementById('pending-text').textContent = `${n} unsaved decision${n === 1 ? '' : 's'}`;
+}
+document.querySelectorAll('.alt-card').forEach(card => {
+  const ta = card.querySelector('textarea');
+  card.addEventListener('click', e => {
+    const act = e.target.dataset && e.target.dataset.act; if (!act) return;
+    if (act === 'approved' && !ta.value.trim()) { ta.focus(); announce('Write alt text first, or choose Decorative.'); return; }
+    pending.set(card.dataset.id, {status: act, text: ta.value});
+    paint(card); bar();
+  });
+  ta.addEventListener('input', () => {
+    const p = pending.get(card.dataset.id);
+    if (p && p.status === 'approved') p.text = ta.value;
+    else if (card.dataset.status === 'approved') pending.set(card.dataset.id, {status: 'approved', text: ta.value});
+    paint(card); bar();
+  });
+  paint(card);
+});
+function announce(msg) { const a = document.getElementById('announce'); a.textContent = ''; setTimeout(() => a.textContent = msg, 50); }
+
+document.getElementById('save').addEventListener('click', async () => {
+  const btn = document.getElementById('save');
+  const decisions = [...pending].map(([id, d]) => ({id, status: d.status, text: d.text}));
+  btn.disabled = true; btn.textContent = 'Saving and updating files…';
+  try {
+    const r = await fetch(SAVE_URL, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({decisions})});
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'Save failed');
+    data.items.forEach(it => {
+      const card = document.getElementById('card-' + it.id); if (!card) return;
+      card.dataset.status = it.status; pending.delete(it.id);
+      card.querySelector('[data-role=note]').textContent = it.note || '';
+      paint(card);
+    });
+    announce(`Saved ${data.items.length} decision${data.items.length === 1 ? '' : 's'}. ${data.notes.join('. ')}`);
+  } catch (err) {
+    announce('Could not save: ' + err.message);
+    alert('Could not save: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save decisions'; bar();
+  }
+});
+// ---- background AI drafting
+const DRAFT_URL = "{{ url_for('alt_draft_start', job_id=job.id) }}";
+const DRAFT_STOP_URL = "{{ url_for('alt_draft_stop', job_id=job.id) }}";
+const JOB_URL = "{{ url_for('job_json', job_id=job.id) }}";
+async function draftPoll() {
+  let job;
+  try { job = await (await fetch(JOB_URL)).json(); } catch (_) { return setTimeout(draftPoll, 4000); }
+  const d = job.drafting || {};
+  for (const f of job.files) for (const it of (f.alt || [])) {
+    const card = document.getElementById('card-' + it.id);
+    if (!card || !it.draft || pending.has(it.id) || card.dataset.status !== 'pending') continue;
+    const ta = card.querySelector('textarea');
+    if (!ta.value.trim()) { ta.value = it.draft; paint(card); }
+  }
+  const st = document.getElementById('draft-status');
+  if (d.running) {
+    st.textContent = d.retrying ? `Retrying ${d.failed} image(s) the AI didn't answer in time (one at a time)… ${d.done} of ${d.total} written`
+      : d.total ? `Drafting alt text with AI: ${d.done} of ${d.total} written…` + (d.failed ? ` (${d.failed} to retry)` : '') : 'Drafting alt text with AI…';
+    setTimeout(draftPoll, 3000);
+  } else if (st) {
+    st.textContent = d.total
+      ? `Finished: ${d.done} of ${d.total} draft(s) written.` + (d.failed ? ` ${d.failed} could not be drafted (${d.reason || 'the AI did not answer'}): press Draft with AI to try them again, or type them.` : ' Review each one before approving.')
+      : st.textContent;
+    document.getElementById('draft-start').hidden = false;
+    document.getElementById('draft-stop').hidden = true;
+  }
+}
+const startBtn = document.getElementById('draft-start');
+if (startBtn) {
+  startBtn.addEventListener('click', async () => {
+    const r = await fetch(DRAFT_URL, {method: 'POST'});
+    const data = await r.json().catch(() => ({}));
+    if (!data.ok) { alert(data.error || 'Could not start drafting.'); return; }
+    startBtn.hidden = true; document.getElementById('draft-stop').hidden = false;
+    document.getElementById('draft-status').textContent = 'Drafting alt text with AI…';
+    setTimeout(draftPoll, 1500);
+  });
+  document.getElementById('draft-stop').addEventListener('click', async () => {
+    await fetch(DRAFT_STOP_URL, {method: 'POST'});
+    document.getElementById('draft-status').textContent = 'Stopping after the current image…';
+  });
+  {% if job.get('drafting', {}).get('running') %}setTimeout(draftPoll, 1000);{% endif %}
+}
+
+// ---- bulk actions
+async function saveDecisions(decisions) {
+  const btn = document.getElementById('save');
+  btn.disabled = true; btn.textContent = 'Saving and updating files…';
+  try {
+    const r = await fetch(SAVE_URL, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({decisions})});
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'Save failed');
+    data.items.forEach(it => {
+      const card = document.getElementById('card-' + it.id); if (!card) return;
+      card.dataset.status = it.status; pending.delete(it.id);
+      card.querySelector('[data-role=note]').textContent = it.note || '';
+      paint(card);
+    });
+    announce(`Saved ${data.items.length} decision${data.items.length === 1 ? '' : 's'}. ${data.notes.join('. ')}`);
+  } catch (err) {
+    announce('Could not save: ' + err.message); alert('Could not save: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save decisions'; bar();
+  }
+}
+const approveAll = document.getElementById('approve-all');
+if (approveAll) {
+  approveAll.addEventListener('click', () => {
+    const cards = [...document.querySelectorAll('.alt-card')].filter(c =>
+      c.dataset.status === 'pending' && c.querySelector('textarea').value.trim());
+    const empty = [...document.querySelectorAll('.alt-card')].filter(c =>
+      c.dataset.status === 'pending' && !c.querySelector('textarea').value.trim()).length;
+    if (!cards.length) {
+      const pendingAll = [...document.querySelectorAll('.alt-card')].filter(c => c.dataset.status === 'pending').length;
+      const drafting = !document.getElementById('draft-stop') ? false : !document.getElementById('draft-stop').hidden;
+      alert(pendingAll === 0
+        ? 'Everything is already reviewed: every image is approved or marked decorative. Nothing left to approve.'
+        : drafting
+          ? 'The AI is still writing drafts for the remaining images. They appear in the boxes as they are written; try again when it finishes.'
+          : 'The images still to review have no text yet. Type alt text for them, or mark them decorative.');
+      return;
+    }
+    if (!confirm(`Approve ${cards.length} image(s) with the text currently in their boxes?` +
+                 (empty ? ` ${empty} image(s) with empty boxes will be skipped.` : '') +
+                 ' AI drafts can be wrong; this writes them into the files as they are.')) return;
+    saveDecisions(cards.map(c => ({id: c.dataset.id, status: 'approved', text: c.querySelector('textarea').value})));
+  });
+  document.getElementById('decorative-all').addEventListener('click', () => {
+    const cards = [...document.querySelectorAll('.alt-card')].filter(c =>
+      c.dataset.status === 'pending' && c.dataset.suggested === '1');
+    if (!cards.length) { alert('No unreviewed images are marked as suggested decorative.'); return; }
+    if (!confirm(`Mark ${cards.length} suggested image(s) as decorative? Screen readers will skip them.`)) return;
+    saveDecisions(cards.map(c => ({id: c.dataset.id, status: 'decorative', text: ''})));
+  });
+}
+
+window.addEventListener('beforeunload', e => { if (pending.size) { e.preventDefault(); e.returnValue = ''; } });
+</script>
+{% endblock %}

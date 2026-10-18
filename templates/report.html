@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remediation report: {{ job.label or job.id }}</title>
+<style>
+  body { font-family: "Atkinson Hyperlegible", system-ui, "Segoe UI", sans-serif; color: #16241f; max-width: 52rem; margin: 2rem auto; padding: 0 1.25rem; line-height: 1.55; }
+  h1 { font-size: 1.8rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.25rem; border-top: 1px solid #ccd5d1; padding-top: 1.25rem; overflow-wrap: anywhere; }
+  h3 { font-size: 1rem; margin: 1rem 0 .25rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  caption { text-align: left; font-weight: 700; margin-bottom: .4rem; }
+  th, td { border: 1px solid #ccd5d1; padding: .4rem .6rem; text-align: left; vertical-align: top; }
+  th { background: #e4f2ec; }
+  h1 { color: #024a3c; border-bottom: 5px solid #5ec238; padding-bottom: .4rem; }
+  .meta, .where { color: #4a5a54; }
+  .where { display: block; font-size: .9rem; overflow-wrap: anywhere; }
+  .err { color: #9a1c26; }
+  .home-row { display: flex; gap: 1.25rem; align-items: center; margin: 0 0 1rem; }
+  .home-btn svg { vertical-align: -4px; margin-right: .35rem; }
+  .home-btn { display: inline-block; background: #036451; color: #fff; font-weight: 700; text-decoration: none;
+    padding: .55rem 1.1rem; border-radius: 6px; }
+  .home-btn:hover { background: #024a3c; }
+  .home-btn:focus-visible, .back-link:focus-visible { outline: 3px solid #1a4fd6; outline-offset: 2px; }
+  .back-link { color: #036451; }
+  li { margin: .3rem 0; }
+</style>
+</head>
+<body>
+<main>
+{% if web_view %}
+<p class="home-row"><a class="home-btn" href="{{ url_for('index') }}"><svg class="home-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20"><path d="M3 11.5 12 4l9 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 10v9.5h5v-5.5h3v5.5h5V10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg> Home</a>
+  <a class="back-link" href="{{ url_for('show_job', job_id=job.id) }}">Back to batch results</a></p>
+{% endif %}
+<h1>Remediation report{% if job.label %}: {{ job.label }}{% endif %}</h1>
+<p class="meta">Started {{ job.created.replace('T', ' ') }}{% if job.finished %}, finished {{ job.finished.replace('T', ' ') }}{% if batch_seconds %} (whole batch: {{ batch_seconds | duration }}){% endif %}{% endif %}.
+Document language {{ job.options.lang }}, OCR language {{ job.options.ocr_lang }}.</p>
+
+<table>
+  <caption>Summary</caption>
+  <thead><tr><th scope="col">File</th><th scope="col">What happened</th><th scope="col">Fixed</th><th scope="col">To review</th><th scope="col">Time taken</th><th scope="col">Status</th></tr></thead>
+  <tbody>
+  {% for f in job.files if f.status != 'deleted' %}
+    <tr><th scope="row"><a href="#file-{{ loop.index }}">{{ f.filename }}</a></th><td>{{ f.route or '—' }}</td>
+    <td>{{ f.fixed | length }}</td><td>{{ f.review | length }}</td><td>{{ f.seconds | duration if f.seconds else '—' }}</td><td>{{ {'done': 'Done', 'error': 'Failed', 'cancelled': 'Stopped'}.get(f.status, f.status | capitalize) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<p>Every file still needs a quick human check. This tool cannot judge color contrast, whether color alone carries meaning,
+whether alt text is accurate, or whether reading order matches the visual order in complex layouts. Test key documents with a
+screen reader or with PAC (PDFs) and Word's Accessibility Checker.</p>
+
+{% for f in job.files if f.status != 'deleted' %}
+<h2 id="file-{{ loop.index }}">{{ f.filename }}</h2>
+{% if f.outputs %}<p>Output: {{ f.outputs | join(', ') }}</p>{% endif %}
+{% if f.errors %}<p class="err">{{ f.errors | join(' ') }}</p>{% endif %}
+{% if f.review %}
+<h3>Needs review</h3>
+<ul>{% for r in f.review %}<li>{{ r.msg }}{% if r.where %}<span class="where">{{ r.where }}</span>{% endif %}</li>{% endfor %}</ul>
+{% endif %}
+{% if f.fixed %}
+<h3>Fixed automatically</h3>
+<ul>{% for r in f.fixed %}<li>{{ r.msg }}{% if r.where %}<span class="where">{{ r.where }}</span>{% endif %}</li>{% endfor %}</ul>
+{% endif %}
+{% endfor %}
+</main>
+</body>
+</html>

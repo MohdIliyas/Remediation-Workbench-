@@ -1,0 +1,233 @@
+{% extends "_base.html" %}
+{% block main %}
+{% with step = 1 %}{% include "_steps.html" %}{% endwith %}
+<h1>Remediate a batch of files</h1>
+<p class="lede">Upload PDFs, Word documents and PowerPoint files. The tool fixes what it safely can, then gives you a checklist of what still needs a person.</p>
+
+{% set err = error or ({'nofiles': 'Choose at least one file to upload.'}).get(request.args.get('error')) %}
+{% if err %}<p class="notice" role="alert">{{ err }}</p>{% endif %}
+
+{% if ai.on %}
+<p class="notice info">AI alt-text drafts are on ({{ ai.model }}, running on this computer).</p>
+{% elif defaults.ollama_url %}
+<p class="notice">AI alt-text drafts are off: {{ ai.reason }}. Images will still be listed for review.</p>
+{% endif %}
+
+<form method="post" action="{{ url_for('create_job') }}" enctype="multipart/form-data" id="upload-form" class="upload-grid">
+  <div class="up-drop">
+  <label class="drop" id="drop">
+    <svg class="drop-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+    <strong>Drop files here, or choose files</strong>
+    <small>Word, PowerPoint and PDF ({{ supported | join(', ') }}) · up to {{ max_mb }} MB per batch</small>
+    <input type="file" name="files" id="files" multiple accept="{{ supported | join(',') }}" aria-describedby="picked">
+  </label>
+  <ul id="picked" aria-live="polite"></ul>
+  </div>
+
+  <fieldset class="up-settings panel">
+    <legend>Batch settings</legend>
+    <div class="field">
+      <label for="label">Batch name <span style="font-weight:400">(optional)</span></label>
+      <p class="hint" id="label-hint">For example, a course code. Shows up in the list below and in the download name.</p>
+      <input type="text" id="label" name="label" aria-describedby="label-hint">
+    </div>
+    <fieldset class="mode">
+      <legend>How should the tool work?</legend>
+      <div class="radio">
+        <input type="radio" id="mode-auto" name="mode" value="auto" checked>
+        <label for="mode-auto"><strong>Automatic (recommended)</strong>
+          <span class="where">The tool looks at each file and applies everything that type of file needs to be
+          accessible.</span></label>
+      </div>
+      <div class="radio">
+        <input type="radio" id="mode-custom" name="mode" value="custom">
+        <label for="mode-custom"><strong>Choose options myself</strong>
+          <span class="where">For when you want a specific setting, such as keeping original colours.</span></label>
+      </div>
+    </fieldset>
+    <details class="auto-summary" id="auto-summary">
+      <summary>What Automatic does for each file type</summary>
+      <ul>
+        <li><strong>Word:</strong> real headings, title and language, contrast fixed with the standard colours, real
+          bullet lists, table header rows, alt-text drafts, background pictures marked decorative, link check,
+          logical heading order.</li>
+        <li><strong>PowerPoint:</strong> title and language, contrast fixed (with a see-through backing for text on
+          photos), alt-text drafts, background pictures marked decorative, link check, slide-title check.</li>
+        <li><strong>PDF:</strong> tags added without changing the look (headings, lists, reading order, figures),
+          title and language, contrast fixed, alt-text drafts, link check, logical heading order.</li>
+        <li><strong>Scanned PDF:</strong> pages read with OCR (sideways pages too), the same-looking tagged scan, plus
+          a reflowed text version that screen readers and Ally handle best.</li>
+        <li><strong>Large files</strong> with many pictures: alt-text drafts are left for the review page so the
+          batch finishes quickly.</li>
+        <li><strong>Handwriting:</strong> not automatic (it's slow and needs a person to check it). Scanned PDFs get a
+          &ldquo;Transcribe handwriting&rdquo; button on the results page.</li>
+      </ul>
+    </details>
+    <div id="custom-opts" hidden>
+    <div class="check">
+      <input type="checkbox" id="also_pdf" name="also_pdf">
+      <label for="also_pdf">Also export a tagged PDF of each Word and PowerPoint file</label>
+    </div>
+    {% if ai.on %}
+    <div class="check">
+      <input type="checkbox" id="handwriting" name="handwriting" {% if defaults.handwriting %}checked{% endif %}>
+      <label for="handwriting">Handwriting: transcribe with AI (PDFs) <span class="where">For handwritten notes and math. Each box or section is read by the AI on this computer, then you check every one against the original and build a typed Word version with real equations. Slower: about 10&ndash;20 seconds per box.</span></label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="ai_drafts" name="ai_drafts" {% if defaults.ai_drafts %}checked{% endif %}>
+      <label for="ai_drafts">Write AI alt-text drafts while remediating <span class="where">Turn off for very large files (long slide decks, image-heavy packets): remediation then finishes in minutes, and you can start the drafts later from the alt-text review page.</span></label>
+    </div>
+    {% endif %}
+    <div class="check">
+      <input type="checkbox" id="fix_contrast" name="fix_contrast" {% if defaults.fix_contrast %}checked{% endif %}>
+      <label for="fix_contrast">Fix low-contrast text <span class="where">Darkens or lightens failing text colours just enough to pass WCAG, keeping the hue. Text on photos or gradients is flagged instead.</span></label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="rebuild_untagged" name="rebuild_untagged" {% if defaults.rebuild_untagged %}checked{% endif %}>
+      <label for="rebuild_untagged">Rebuild untagged PDFs through Word <span class="where">Off (recommended): tags are added in place and the layout stays exactly the same. On: also gives an editable Word copy, but the layout can change.</span></label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="straighten_pages" name="straighten_pages" {% if defaults.straighten_pages %}checked{% endif %}>
+      <label for="straighten_pages">For scans, show sideways pages upright <span class="where">Off: pages look exactly like the original. Sideways text is read correctly either way.</span></label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="text_version" name="text_version" {% if defaults.text_version %}checked{% endif %}>
+      <label for="text_version">For scans, also make a reflowed text version <span class="where">A plain, resizable text copy for e-readers. The main file always keeps the original look.</span></label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="standard_colors" name="standard_colors" {% if defaults.standard_colors %}checked{% endif %}>
+      <label for="standard_colors">Use standard colours for contrast fixes <span class="where">Text that fails contrast becomes black, dark blue, dark red, dark green or white (whichever is closest and passes). Untick to keep each colour's own shade, just darker or lighter.</span></label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="text_backings" name="text_backings" {% if defaults.text_backings %}checked{% endif %}>
+      <label for="text_backings">PowerPoint: add see-through backing behind text on photos <span class="where">Only for text that still fails contrast over a picture. Uses the lightest backing that passes, so the photo still shows through. Untick to leave slide designs exactly as they are.</span></label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="convert_lists" name="convert_lists" {% if defaults.convert_lists %}checked{% endif %}>
+      <label for="convert_lists">Turn typed bullets into real Word lists <span class="where">Changes indentation slightly. When off, typed lists are only flagged and the layout stays exactly as it is.</span></label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="check_links" name="check_links" {% if defaults.check_links %}checked{% endif %}>
+      <label for="check_links">Check that links work <span class="where">Only the web addresses are visited. The files are never sent anywhere.</span></label>
+    </div>
+    </div>
+    <details>
+      <summary>Language settings</summary>
+      <div class="field">
+        <label for="lang">Document language</label>
+        <p class="hint" id="lang-hint">Language tag written into each file, such as en-US or es.</p>
+        <input type="text" id="lang" name="lang" value="{{ defaults.lang }}" aria-describedby="lang-hint">
+      </div>
+      <div class="field">
+        <label for="ocr_lang">OCR language for scanned pages</label>
+        <p class="hint" id="ocr-hint">Tesseract codes. Join several with +, such as eng+spa.</p>
+        <input type="text" id="ocr_lang" name="ocr_lang" value="{{ defaults.ocr_lang }}" aria-describedby="ocr-hint">
+      </div>
+    </details>
+  </fieldset>
+
+  <div class="actions up-start">
+    <progress id="upload-progress" max="100" value="0" hidden aria-label="Upload progress"></progress>
+    <p id="upload-note" class="where" role="status" aria-live="polite" hidden></p>
+    <button type="submit">Start remediation
+    <svg class="btn-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div>
+</form>
+
+{% if not recent %}
+<p class="history-link"><a href="{{ url_for('history') }}">View history of remediated files</a></p>
+{% endif %}
+{% if recent %}
+<div class="recent-head"><h2>Recent batches</h2>
+  <a href="{{ url_for('history') }}">View full history</a></div>
+<ul class="recent-cards">
+  {% for j in recent %}
+  {% set live = j.files | rejectattr('status', 'equalto', 'deleted') | list %}
+  {% set done = live | selectattr('status', 'in', ['done', 'error', 'cancelled']) | list | length %}
+  {% set to_review = live | map(attribute='review') | map('length') | sum %}
+  {% set failed = live | selectattr('status', 'equalto', 'error') | list | length %}
+  <li class="rc">
+    <a href="{{ url_for('show_job', job_id=j.id) }}">{{ j.label or ('Batch from ' ~ j.created.replace('T', ' ')[:16]) }}</a>
+    <span class="meta">{{ live | length }} file{{ '' if live | length == 1 else 's' }} · {{ j.created.replace('T', ' ')[:16] }}</span>
+    {% if done < live | length %}<span class="pill run">Working… {{ done }} of {{ live | length }}</span>
+    {% elif j.get('drafting', {}).get('running') %}<span class="pill run">Drafting alt text… {{ j.drafting.done }} of {{ j.drafting.total }}</span>
+    {% elif failed %}<span class="pill bad">{{ failed }} failed</span>
+    {% elif to_review %}<span class="pill am">{{ to_review }} to review</span>
+    {% else %}<span class="pill ok">Done</span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const custom = document.getElementById('custom-opts');
+  const summary = document.getElementById('auto-summary');
+  const sync = () => {
+    const manual = document.getElementById('mode-custom').checked;
+    custom.hidden = !manual;
+    summary.hidden = manual;
+  };
+  document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', sync));
+  sync();
+})();
+const input = document.getElementById('files'), drop = document.getElementById('drop'), picked = document.getElementById('picked');
+const escHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function show() {
+  const fs = [...input.files], n = fs.length;
+  const kind = name => { const e = name.split('.').pop().toLowerCase();
+    return e.startsWith('doc') ? ['DOC', 'w'] : e.startsWith('ppt') ? ['PPT', 'p'] : e === 'pdf' ? ['PDF', 'd'] : [e.toUpperCase(), 'x']; };
+  const size = b => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+  picked.innerHTML = n ? `<li class="picked-head">${n} file${n > 1 ? 's' : ''} selected</li>` +
+    fs.map((f, i) => { const [k, c] = kind(f.name); return `<li class="pick">
+      <span class="badge-type ${c}" aria-hidden="true">${k}</span>
+      <span class="pick-txt"><span class="pick-name">${escHtml(f.name)}</span><span class="pick-size">${size(f.size)}</span></span>
+      <button type="button" class="link-btn" data-i="${i}" aria-label="Remove ${escHtml(f.name)}">Remove</button></li>`; }).join('') : '';
+}
+picked.addEventListener('click', e => {
+  const i = e.target.dataset && e.target.dataset.i;
+  if (i === undefined) return;
+  const dt = new DataTransfer();
+  [...input.files].forEach((f, k) => { if (k !== Number(i)) dt.items.add(f); });
+  input.files = dt.files;
+  show();
+  input.focus();
+});
+input.addEventListener('change', show);
+['dragenter', 'dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('dragging'); }));
+['dragleave', 'drop'].forEach(e => drop.addEventListener(e, () => drop.classList.remove('dragging')));
+drop.addEventListener('drop', ev => { ev.preventDefault(); input.files = ev.dataTransfer.files; show(); });
+// one submit only: upload with progress, then open the batch
+let submitted = false;
+document.getElementById('upload-form').addEventListener('submit', e => {
+  const form = e.target;
+  const start = form.querySelector('button[type=submit]');
+  if (submitted) { e.preventDefault(); return; }
+  if (!input.files.length) return;            // the server explains "choose at least one file"
+  submitted = true;
+  start.disabled = true;
+  start.textContent = 'Uploading…';
+  const bar = document.getElementById('upload-progress');
+  const note = document.getElementById('upload-note');
+  if (!window.XMLHttpRequest || !window.FormData) return;   // old browser: normal upload (button stays disabled)
+  e.preventDefault();
+  bar.hidden = false; note.hidden = false;
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', form.action);
+  xhr.upload.onprogress = ev => {
+    if (!ev.lengthComputable) return;
+    const pct = Math.round(100 * ev.loaded / ev.total);
+    start.textContent = pct < 100 ? `Uploading… ${pct}%` : 'Starting the batch…';
+    bar.value = pct;
+    note.textContent = pct < 100 ? `Uploading ${input.files.length} file(s): ${pct}%. Keep this page open.` : 'Upload complete. Opening the batch…';
+  };
+  xhr.onload = () => { window.location.href = xhr.responseURL || '/'; };
+  xhr.onerror = () => {
+    submitted = false; start.disabled = false; start.textContent = 'Start remediation';
+    note.textContent = 'The upload failed (connection lost?). Please try again.';
+  };
+  xhr.send(new FormData(form));
+});
+</script>
+{% endblock %}

@@ -1,0 +1,242 @@
+{% extends "_base.html" %}
+{% block title %}{{ job.label or 'Batch ' + job.id }} · Remediation Workbench{% endblock %}
+{% block main %}
+<p class="home-row"><a class="button" href="{{ url_for('index') }}"><svg class="home-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20"><path d="M3 11.5 12 4l9 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 10v9.5h5v-5.5h3v5.5h5V10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg> Home</a></p>
+{% with step = 3 if job.finished else 2 %}{% include "_steps.html" %}{% endwith %}
+<h1>{{ job.label or 'Batch from ' + job.created.replace('T', ' ') }}</h1>
+
+<div class="progress-line">
+  <progress id="bar" max="{{ job.files | length }}" value="0" aria-labelledby="progress-text"></progress>
+  <p id="progress-text" role="status" aria-live="polite">Loading…</p>
+  <div id="draft-progress" hidden>
+    <p class="progress-note" id="draft-progress-text" role="status" aria-live="polite"></p>
+    <div class="draft-bar" aria-hidden="true"><i id="draft-progress-bar"></i></div>
+  </div>
+</div>
+
+<ul class="tally" id="tally"></ul>
+
+<div class="actions" id="stop-area" hidden>
+  <button type="button" class="button danger" id="stop-btn">Stop remediating</button>
+  <span class="where" id="stop-note">Files not started yet are skipped. Files in progress stop at the next safe point.</span>
+</div>
+
+<div class="actions" id="bulk" hidden>
+  <a class="button" href="{{ url_for('download_all', job_id=job.id) }}">Download all files and report (.zip)</a>
+  <a class="button secondary" href="{{ url_for('view_report', job_id=job.id) }}">Open report</a>
+  <a class="button" id="alt-link" href="{{ url_for('alt_review', job_id=job.id) }}" hidden></a>
+  <a class="button" id="hw-link" href="{{ url_for('hw_review', job_id=job.id) }}" hidden></a>
+  <a class="button secondary" id="hw-report-link" href="{{ url_for('typed_report', job_id=job.id) }}" hidden>Typed version report</a>
+  <button type="button" class="button danger" id="delete-batch">Delete batch</button>
+</div>
+
+{% if job.skipped %}
+<p class="notice">Skipped (unsupported type): {{ job.skipped | join(', ') }}</p>
+{% endif %}
+
+<h2>Files</h2>
+<p class="lede">Tick items off as you review them. Ticks are saved in this browser.</p>
+<ul class="files" id="files"></ul>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const JOB = {{ job | tojson }};
+const API = "{{ url_for('job_json', job_id=job.id) }}";
+const FILE_URL = "{{ url_for('download_file', job_id=job.id, name='__N__') }}";
+const dur = sec => { sec = Math.round(sec || 0); if (sec < 60) return sec + ' s';
+  const m = Math.floor(sec / 60), r = sec % 60; if (m < 60) return `${m} min ${String(r).padStart(2, '0')} s`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`; };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const key = (f, i) => `rw:${JOB.id}:${f}:${i}`;
+const openState = {};  // remember which <details> are open between refreshes
+
+function statusBadge(f) {
+  if (f.status === 'done' && f.review.length) return `<span class="status review">${f.review.length} to review</span>`;
+  const label = {queued: 'Waiting', processing: 'Working…', done: 'Done', error: 'Failed', cancelled: 'Stopped'}[f.status];
+  return `<span class="status ${f.status}">${label}</span>`;
+}
+
+function fileCard(f, n) {
+  const id = `f${n}`;
+  const state = f.status === 'error' ? 'bad' : f.status === 'cancelled' ? 'stop'
+    : ['queued', 'processing'].includes(f.status) ? 'run' : (f.review.length ? 'am' : 'ok');
+  let html = `<li class="file st-${state}" aria-labelledby="${id}-name"><div class="file-head"><div>
+    <h3 id="${id}-name">${esc(f.filename)}</h3>
+    ${f.route ? `<p class="route">${esc(f.route)}</p>` : ''}
+    ${f.status === 'processing' && f.progress ? `<p class="route progress-note">${esc(f.progress)}</p>` : ''}
+    ${f.status === 'processing' ? `<div class="work-bar" aria-hidden="true"><i></i></div>` : ''}
+    ${['done', 'error', 'cancelled'].includes(f.status) && f.seconds ? `<p class="route took">Took ${dur(f.seconds)}</p>` : ''}</div>${statusBadge(f)}</div>`;
+  if (f.outputs.length) {
+    html += `<ul class="downloads">` + f.outputs.map((o, k) =>
+      `<li><a class="button ${k ? 'secondary' : ''}" href="${FILE_URL.replace('__N__', encodeURIComponent(o))}">Download ${esc(o)}</a></li>`).join('') + `</ul>`;
+  }
+  if (f.errors.length) html += `<p class="errors">${f.errors.map(esc).join('<br>')}</p>`;
+  if (f.status === 'done' && /\.pdf$/i.test(f.filename) && (/^Scanned/.test(f.route || '') || f.handwritten) && !(f.hw || []).length) {
+    const busy = ((window.lastJob || {}).hw_busy || {})[`${f._i}:all`];
+    html += `<p class="file-tools"><button type="button" class="button secondary" data-hw="${f._i}" ${busy ? 'disabled' : ''}>
+      ${busy ? 'Transcribing handwriting… (this can take a while)' : 'Transcribe handwriting'}</button>
+      <span class="where">Only if this scan has handwritten notes or math. The AI reads it, then you check it.</span></p>`;
+  }
+  if (['done', 'error', 'cancelled'].includes(f.status)) {
+    html += `<p class="file-tools"><button type="button" class="link-btn" data-del="${f._i}"
+      aria-label="Delete ${esc(f.filename)} and its remediated files">Delete this file</button></p>`;
+  }
+  if (f.review.length) {
+    const items = f.review.map((r, i) => {
+      const k = key(f.filename, i), done = localStorage.getItem(k) === '1';
+      return `<li class="${done ? 'done-item' : ''}"><input type="checkbox" id="${id}-r${i}" data-k="${k}" ${done ? 'checked' : ''}>
+        <label for="${id}-r${i}">${esc(r.msg)}${r.where ? `<span class="where">${esc(r.where)}</span>` : ''}</label></li>`;
+    }).join('');
+    const d = `${id}-review`;
+    html += `<details id="${d}" ${(openState[d] ?? true) ? 'open' : ''}><summary>Needs review (${f.review.length})</summary><ul class="checklist">${items}</ul></details>`;
+  }
+  if (f.fixed.length) {
+    const d = `${id}-fixed`;
+    html += `<details id="${d}" ${(openState[d] ?? false) ? 'open' : ''}><summary>Fixed automatically (${f.fixed.length})</summary><ul class="fixed-list">` +
+      f.fixed.map(x => `<li>${esc(x.msg)}${x.where ? `<span class="where">${esc(x.where)}</span>` : ''}</li>`).join('') + `</ul></details>`;
+  }
+  return html + `</li>`;
+}
+
+let lastSig = '';
+function render(job) {
+  window.lastJob = job;
+  const dr = job.drafting || {};
+
+  const dbox = document.getElementById('draft-progress');
+  if (dbox) {
+    dbox.hidden = !dr.running;
+    if (dr.running) {
+      document.getElementById('draft-progress-text').textContent = dr.retrying
+        ? `Retrying ${dr.failed} image(s) the AI didn't answer in time… ${dr.done} of ${dr.total} written`
+        : dr.total ? `Writing AI alt-text drafts: ${dr.done} of ${dr.total} images…` + (dr.failed ? ` (${dr.failed} to retry)` : '')
+        : 'Writing AI alt-text drafts…';
+      document.getElementById('draft-progress-bar').style.width = dr.total ? `${Math.round(100 * dr.done / dr.total)}%` : '5%';
+    }
+  }
+  const files = job.files.map((f, i) => ({...f, _i: i})).filter(f => f.status !== 'deleted');
+  const total = files.length;
+  const finished = files.filter(f => ['done', 'error', 'cancelled'].includes(f.status)).length;
+  const stopped = files.filter(f => f.status === 'cancelled').length;
+  const failed = files.filter(f => f.status === 'error').length;
+  const fixes = files.reduce((a, f) => a + f.fixed.length, 0);
+  const reviews = files.reduce((a, f) => a + f.review.length, 0);
+  document.getElementById('bar').value = finished;
+  document.getElementById('progress-text').textContent = finished === total
+    ? `All ${total} file${total === 1 ? '' : 's'} processed${failed ? `, ${failed} failed` : ''}${stopped ? `, ${stopped} stopped` : ''}.` +
+      (job.finished && job.created ? ` Whole batch took ${dur((new Date(job.finished) - new Date(job.created)) / 1000)}.` : '')
+    : `Processing: ${finished} of ${total} files done.`;
+  const imgs = files.reduce((a, f) => a + (f.alt || []).length, 0);
+  document.getElementById('tally').innerHTML =
+    `<li><b>${fixes}</b><span>fixes made</span></li><li class="${reviews ? 'am' : ''}"><b>${reviews}</b><span>items to review</span></li>` +
+    `<li class="${failed ? 'bad' : ''}"><b>${failed}</b><span>failed</span></li><li><b>${imgs}</b><span>images for alt text</span></li>`;
+  if (finished === total && total && !(job.drafting || {}).running) {   // step tracker: Review & download
+    document.querySelectorAll('.steps li').forEach((li, i) => {
+      li.className = i < 2 ? 'done' : 'on';
+      if (i === 2) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
+      const n = li.querySelector('.n'); if (n) n.textContent = i < 2 ? '\u2713' : '3';
+    });
+  }
+  document.getElementById('bulk').hidden = finished !== total || total === 0;
+  const stopArea = document.getElementById('stop-area');
+  stopArea.hidden = finished === total || total === 0;
+  if (job.cancel_requested && finished !== total) {
+    const btn = document.getElementById('stop-btn');
+    btn.disabled = true; btn.textContent = 'Stopping…';
+    document.getElementById('progress-text').textContent += ' Stopping after the current step…';
+  }
+  const alts = files.flatMap(f => f.alt || []), left = alts.filter(a => a.status === 'pending').length;
+  const hwLink = document.getElementById('hw-link');
+  const hwAll = files.flatMap(f => f.hw || []);
+  if (finished === total && hwAll.length) {
+    const left = hwAll.filter(b => b.status === 'pending').length;
+    hwLink.textContent = left ? `Review handwriting (${left} of ${hwAll.length} boxes left)` : `Handwriting reviewed (${hwAll.length})`;
+    hwLink.hidden = false;
+    document.getElementById('hw-report-link').hidden = false;
+  }
+  if ((job.drafting || {}).running && finished === total) {
+    document.getElementById('progress-text').textContent = 'Remediation done. Writing AI alt-text drafts so they are ready for review…';
+  }
+  const link = document.getElementById('alt-link');
+  const drafting = (job.drafting || {}).running;
+  link.hidden = alts.length === 0;
+  if (drafting) {   // drafts are part of remediating: the review opens only when they're all written
+    const dd = job.drafting;
+    link.textContent = dd.total ? `Drafting alt text… ${dd.done} of ${dd.total}` : 'Drafting alt text…';
+    link.setAttribute('aria-disabled', 'true');
+    link.classList.add('is-busy');
+    link.removeAttribute('href');
+  } else {
+    link.textContent = left ? `Review alt text (${left} of ${alts.length} left)` : `Alt text reviewed (${alts.length})`;
+    link.removeAttribute('aria-disabled');
+    link.classList.remove('is-busy');
+    link.setAttribute('href', "{{ url_for('alt_review', job_id=job.id) }}");
+  }
+
+  const sig = JSON.stringify(files.map(f => [f.status, f.fixed.length, f.review.map(r => r.msg).join('|'), f.progress || '', f.seconds || 0]));
+  if (sig !== lastSig) {  // only rebuild the list when something changed, so focus isn't lost
+    document.querySelectorAll('#files details').forEach(d => { openState[d.id] = d.open; });
+    document.getElementById('files').innerHTML = files.map(fileCard).join('');
+    lastSig = sig;
+  }
+  return finished === total && !(job.drafting || {}).running;  // keep watching while drafts are written
+}
+
+document.getElementById('files').addEventListener('change', e => {
+  const k = e.target.dataset.k; if (!k) return;
+  localStorage.setItem(k, e.target.checked ? '1' : '0');
+  e.target.closest('li').classList.toggle('done-item', e.target.checked);
+});
+
+document.getElementById('stop-btn').addEventListener('click', async () => {
+  if (!confirm('Stop remediating this batch? Files that are already done stay available.')) return;
+  const btn = document.getElementById('stop-btn');
+  btn.disabled = true; btn.textContent = 'Stopping…';
+  try { await fetch("{{ url_for('cancel_job', job_id=job.id) }}", {method: 'POST'}); } catch (_) {}
+});
+
+document.getElementById('files').addEventListener('click', async e => {
+  const h = e.target.dataset && e.target.dataset.hw;
+  if (h !== undefined) {
+    const r = await fetch(`${API}/files/${h}/handwriting/start`, {method: 'POST'});
+    const data = await r.json().catch(() => ({}));
+    if (!data.ok) { alert(data.error || 'Could not start.'); return; }
+    e.target.disabled = true; e.target.textContent = 'Transcribing handwriting… (this can take a while)';
+    const wait = async () => {
+      const job = await (await fetch(API)).json();
+      if ((job.hw_busy || {})[`${h}:all`]) return setTimeout(wait, 5000);
+      location.reload();
+    };
+    setTimeout(wait, 5000);
+    return;
+  }
+  const i = e.target.dataset && e.target.dataset.del;
+  if (i === undefined) return;
+  const card = e.target.closest('li.file');
+  const name = card ? card.querySelector('h3').textContent : 'this file';
+  if (!confirm(`Delete ${name}? This removes the uploaded file and its remediated files from this computer.`)) return;
+  const r = await fetch(`${API}/files/${i}/delete`, {method: 'POST'});
+  const data = await r.json().catch(() => ({}));
+  if (!data.ok) { alert(data.error || 'Could not delete the file.'); return; }
+  lastSig = '';
+  render(await (await fetch(API)).json());
+});
+document.getElementById('delete-batch').addEventListener('click', async () => {
+  if (!confirm('Delete this whole batch? All uploaded and remediated files in it will be removed from this computer.')) return;
+  const r = await fetch("{{ url_for('delete_job', job_id=job.id) }}", {method: 'POST'});
+  const data = await r.json().catch(() => ({}));
+  if (!data.ok) { alert(data.error || 'Could not delete the batch.'); return; }
+  window.location.href = data.redirect;
+});
+
+async function poll() {
+  try {
+    const job = await (await fetch(API)).json();
+    if (render(job)) return;
+  } catch (_) {}
+  setTimeout(poll, 2000);
+}
+render(JOB); poll();
+</script>
+{% endblock %}

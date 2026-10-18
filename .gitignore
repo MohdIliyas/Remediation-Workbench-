@@ -1,0 +1,16 @@
+# batches, uploads, remediated files and history: never commit course files
+data/
+*.zip
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# local settings and secrets
+.env
+docker-compose.override.yml
+# editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

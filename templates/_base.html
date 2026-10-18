@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Remediation Workbench{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=app_version) }}">
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+<header class="site">
+  <div class="band"><div class="edge">
+    <span class="logo-link" aria-hidden="true"></span>
+    <a class="brand" href="{{ url_for('index') }}">Remediation Workbench</a>
+    <span class="contact" aria-hidden="true"></span>
+  </div></div>
+</header>
+<main id="main" class="wrap">
+{% block main %}{% endblock %}
+</main>
+<footer class="site"><div class="wrap">
+  <p>Remediation Workbench</p>
+  <p class="version">Version {{ app_version }}</p>
+</div></footer>
+{% block scripts %}{% endblock %}
+</body>
+</html>
