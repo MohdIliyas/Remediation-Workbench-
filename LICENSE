@@ -1,47 +1,52 @@
-Remediation Workbench v10.14 License
-
-Copyright 2026 Mohammed Iliyas Sanjamala. All Rights Reserved.
+Remediation Workbench License
 Version 1.0 - Free for Internal Use, No Modification, No Resale
+
+Copyright (c) 2026 Mohammed Iliyas Sanjamala. All rights reserved.
 
 THIS IS NOT AN OPEN SOURCE LICENSE.
 
 1. GRANT - FREE FOR INTERNAL USE
+You may, free of charge:
+- download and install this software;
+- use it for personal use;
+- use it internally within your organization, university or company for accessibility remediation;
+- change its configuration settings (for example in docker-compose.yml or environment variables:
+  passwords, ports, retention, AI model). Configuration changes are not modifications under section 2.
 
-You are free to:
-- Download this software
-- Use it for personal use
-- Use it internally within your organization, university, or company for accessibility remediation
-- Run it locally via Docker, no files leave your machine.
-
-2. YOU MAY NOT:
-
-- Modify, change, adapt, translate, or create derivative works
-- Sell it, resell it, license it, or charge for it
-- Host it as a paid service, SaaS, API, or cloud service
-- Offer it as part of a paid remediation service
-- Remove copyright notices, watermarks, or remediation-report attribution
-- Use it to train AI models to create a competing product
-- Make it part of a vendor product that you sell to universities
+2. YOU MAY NOT
+- modify, adapt, translate or create derivative works of the source code;
+- sell, resell, sublicense or charge for the software;
+- host it as a paid service, SaaS, API or cloud service, or offer it as part of a paid remediation service;
+- include it in a product sold to universities or other organizations;
+- remove copyright notices or the attribution required in section 3;
+- use the source code to train AI models for a competing product.
 
 3. ATTRIBUTION
+Keep this LICENSE file and the copyright notice in all copies. When you use the software, credit:
+"Uses Remediation Workbench by Mohammed Iliyas Sanjamala".
 
-You must keep this LICENSE file and copyright notice in all copies.
-If you use it internally, you must credit: "Uses Remediation Workbench v10.14 by Mohammed Iliyas Sanjamala"
+4. THIRD-PARTY SOFTWARE
+This license covers only the author's own code. The software uses third-party components that remain
+under their own licenses (see THIRD_PARTY_NOTICES.md). Nothing in this license restricts rights you
+have under those licenses.
 
-4. NO WARRANTY
+5. NO WARRANTY
+The software is provided "as is", without warranty of any kind. No remediation tool is fully accurate;
+human review is required, including for alt text, colour meaning, complex tables and math.
 
-This tool is not 100% accurate — no remediation tool is. Further remediation and human review is required for alt-text, color meaning, complex tables, and math. Provided as-is.
+6. LIMITATION OF LIABILITY
+In no event shall the author be liable for any claim, damages or other liability arising from the use
+of the software or of files it produces, including accessibility or legal compliance outcomes.
 
-5. OWNERSHIP
+7. OWNERSHIP
+The software is owned by Mohammed Iliyas Sanjamala.
 
-I am the sole owner: Mohammed Iliyas Sanjamala.
-Inspired by Arizona State University's open-source tool.
+8. COMMERCIAL LICENSE
+To modify, sell, host as a service or include the software in a paid product, you need a separate
+written commercial license. Contact: mohdiliyas83@outlook.com
 
-6. COMMERCIAL LICENSE
+9. TERMINATION
+If you violate this license, your rights under it end automatically.
 
-If you want to modify it, sell it, host it as a service, or include it in a paid product, you need a separate written commercial license from me.
-Contact: mohdiliyas83@outlook.com
-
-7. TERMINATION
-
-If you violate this license, your rights terminate automatically.
+10. GOVERNING LAW
+This license is governed by the laws of the State of Ohio, USA.
