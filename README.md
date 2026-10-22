@@ -81,4 +81,19 @@ Optional: Install veraPDF for PDF/UA validation.
 
 ## License
 
-Project code is MIT License (see LICENSE). Relies on open-source dependencies under their own licenses including AGPL-licensed PyMuPDF and Ghostscript — see THIRD_PARTY_NOTICES.md.
+Copyright (c) 2026 Mohammed Iliyas Sanjamala. All rights reserved.
+
+Remediation Workbench is **free for personal and internal organizational use**, but it is **not open source**.
+You may install it, use it and change its configuration settings (passwords, ports, AI model), but you may not
+modify the source code, sell it, host it as a service or include it in a paid product without a written
+commercial license. See [LICENSE](LICENSE) for the full terms.
+
+When you use it, please credit: "Uses Remediation Workbench by Mohammed Iliyas Sanjamala".
+
+Third-party components remain under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+For a commercial license, contact mohdiliyas83@outlook.com.
+
+## Acknowledgments
+
+Inspired by Arizona State University's open-source accessibility tool.
